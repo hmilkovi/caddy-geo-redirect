@@ -39,7 +39,6 @@ func (Middleware) CaddyModule() caddy.ModuleInfo {
 }
 
 func (m *Middleware) Provision(ctx caddy.Context) error {
-	caddy.Log().Named("http.handlers.latency_redirect").Info("Provision")
 	m.logger = ctx.Logger()
 
 	if m.MaxCacheSize == 0 {
@@ -109,7 +108,7 @@ func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 		redirectFullUrl := r.URL
 		redirectFullUrl.Host = redirectDomain
 		redirectFullUrlStr := redirectFullUrl.String()
-		m.logger.Debug("Redirecting to", zap.String("url", redirectFullUrlStr))
+		m.logger.Debug("Redirecting to", zap.String("url", redirectFullUrlStr), zap.Uint64("cache_len", m.GeoIP.GeoDistanceCacheLen.Load()))
 		http.Redirect(w, r, redirectFullUrlStr, http.StatusFound)
 	}
 

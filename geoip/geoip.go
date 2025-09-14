@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/oschwald/geoip2-golang/v2"
@@ -28,10 +29,11 @@ type dnsCacheEntry struct {
 }
 
 type GeoIpDatabase struct {
-	database         *geoip2.Reader
-	geoDistanceCache sync.Map
-	maxCacheSize     int
-	dnsCache         sync.Map
+	database            *geoip2.Reader
+	geoDistanceCache    sync.Map
+	GeoDistanceCacheLen *atomic.Uint64
+	maxCacheSize        int
+	dnsCache            sync.Map
 }
 
 // LoadDatabase loads mmdb in memory so we can reuse it
@@ -149,6 +151,7 @@ func (g *GeoIpDatabase) GetDomainWithSmallestGeoDistance(clientIp *netip.Addr, d
 			entry := value.(geoDistanceCacheEntry)
 			if time.Since(entry.InsertTime).Seconds() > float64(entry.TTLSeconds) {
 				g.geoDistanceCache.Delete(key)
+				g.GeoDistanceCacheLen.Swap(g.GeoDistanceCacheLen.Load() - 1)
 			}
 			return true
 		})
@@ -172,14 +175,17 @@ func (g *GeoIpDatabase) GetDomainWithSmallestGeoDistance(clientIp *netip.Addr, d
 		}
 	}
 
-	g.geoDistanceCache.Store(
-		clientIp.String(),
-		geoDistanceCacheEntry{
-			Domain:     currentDomain,
-			TTLSeconds: cacheTTLSec,
-			InsertTime: time.Now().UTC(),
-		},
-	)
+	if int(g.GeoDistanceCacheLen.Load()) <= g.maxCacheSize {
+		g.GeoDistanceCacheLen.Add(1)
+		g.geoDistanceCache.Store(
+			clientIp.String(),
+			geoDistanceCacheEntry{
+				Domain:     currentDomain,
+				TTLSeconds: cacheTTLSec,
+				InsertTime: time.Now().UTC(),
+			},
+		)
+	}
 
 	return currentDomain, nil
 }
