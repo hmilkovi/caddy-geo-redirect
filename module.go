@@ -108,8 +108,9 @@ func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 		m.logger.Debug("Found domain that has smaller latency", zap.String("domain", redirectDomain))
 		redirectFullUrl := r.URL
 		redirectFullUrl.Host = redirectDomain
-		m.logger.Debug("Redirecting to", zap.String("url", redirectFullUrl.String()))
-		http.Redirect(w, r, redirectFullUrl.String(), http.StatusFound)
+		redirectFullUrlStr := redirectFullUrl.String()
+		m.logger.Debug("Redirecting to", zap.String("url", redirectFullUrlStr))
+		http.Redirect(w, r, redirectFullUrlStr, http.StatusFound)
 	}
 
 	return next.ServeHTTP(w, r)
