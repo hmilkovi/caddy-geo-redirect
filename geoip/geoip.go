@@ -34,7 +34,10 @@ type GeoIpDatabase struct {
 }
 
 // LoadDatabase loads mmdb in memory so we can reuse it
+// if mmdbPath is empty string we will by default use in memory DB-IP and download it every month
 func LoadDatabase(mmdbPath string, maxCacheSize int) (*GeoIpDatabase, error) {
+	var db *geoip2.Reader
+
 	db, err := geoip2.Open(mmdbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load geoip db: %w", err)
@@ -102,7 +105,7 @@ func (g *GeoIpDatabase) DistanceFromClientIPtoDomainHost(clientIp *netip.Addr, d
 	} else {
 		hostIps, err := net.LookupIP(domainName)
 		if err != nil {
-			return -1, fmt.Errorf("failed to resolve %s: %w", domainName, err)
+			return -1, err
 		}
 
 		hostIpAddr, ok := netip.AddrFromSlice(hostIps[0])

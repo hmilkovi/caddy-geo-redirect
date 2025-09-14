@@ -34,3 +34,7 @@ go.work.sum
 *.mmdb
 
 poc.go
+
+buildenv*
+caddy
+Caddyfile
