@@ -29,11 +29,9 @@ type dnsCacheEntry struct {
 
 type GeoIpDatabase struct {
 	database         *geoip2.Reader
-	geoDistanceCache map[string]geoDistanceCacheEntry
-	geoCacheMutex    sync.RWMutex
+	geoDistanceCache sync.Map
 	maxCacheSize     int
-	dnsCache         map[string]dnsCacheEntry
-	dnsCacheMutex    sync.RWMutex
+	dnsCache         sync.Map
 }
 
 // LoadDatabase loads mmdb in memory so we can reuse it
@@ -47,44 +45,9 @@ func LoadDatabase(mmdbPath string, maxCacheSize int) (*GeoIpDatabase, error) {
 	}
 
 	return &GeoIpDatabase{
-		database:         db,
-		geoDistanceCache: make(map[string]geoDistanceCacheEntry),
-		maxCacheSize:     maxCacheSize,
-		dnsCache:         make(map[string]dnsCacheEntry),
+		database:     db,
+		maxCacheSize: maxCacheSize,
 	}, nil
-}
-
-// getFromDnsCache reads from dns cache in a race condition safe way
-func (g *GeoIpDatabase) getFromDnsCache(domainName string) (dnsCacheEntry, bool) {
-	g.dnsCacheMutex.RLock()
-	defer g.dnsCacheMutex.RUnlock()
-	entry, exists := g.dnsCache[domainName]
-	return entry, exists
-}
-
-// addToDnsCache adds to dns cache in a race condition safe way
-func (g *GeoIpDatabase) addToDnsCache(domainName string, entry dnsCacheEntry) {
-	g.dnsCacheMutex.Lock()
-	defer g.dnsCacheMutex.Unlock()
-	g.dnsCache[domainName] = entry
-}
-
-// getFromGeoDistanceCache reads from geo distance cache in a race condition safe way
-func (g *GeoIpDatabase) getFromGeoDistanceCache(ipAddr string) (geoDistanceCacheEntry, bool) {
-	g.geoCacheMutex.RLock()
-	defer g.geoCacheMutex.RUnlock()
-	entry, exists := g.geoDistanceCache[ipAddr]
-	return entry, exists
-}
-
-// addToGeoDistanceCache adds to geo distance cache in a race condition safe way
-func (g *GeoIpDatabase) addToGeoDistanceCache(ipAddr string, entry geoDistanceCacheEntry) {
-	if len(g.geoDistanceCache) > g.maxCacheSize {
-		return
-	}
-	g.geoCacheMutex.Lock()
-	defer g.geoCacheMutex.Unlock()
-	g.geoDistanceCache[ipAddr] = entry
 }
 
 // getIPLatLong lookups up lat,long geo data from mmdb database
@@ -132,11 +95,11 @@ func (g *GeoIpDatabase) DistanceFromClientIPtoDomainHost(clientIp *netip.Addr, d
 	}
 
 	var hostIp netip.Addr
-	cachedDNSEntry, exists := g.getFromDnsCache(domainName)
+	cachedDNSEntry, exists := g.dnsCache.Load(domainName)
 	if exists {
-		hostIp = cachedDNSEntry.Ip
-		if time.Since(cachedDNSEntry.InsertTime).Seconds() > 10 {
-			delete(g.dnsCache, domainName)
+		hostIp = cachedDNSEntry.(dnsCacheEntry).Ip
+		if time.Since(cachedDNSEntry.(dnsCacheEntry).InsertTime).Seconds() > 10 {
+			g.dnsCache.Delete(domainName)
 		}
 	} else {
 		hostIps, err := net.LookupIP(domainName)
@@ -150,7 +113,7 @@ func (g *GeoIpDatabase) DistanceFromClientIPtoDomainHost(clientIp *netip.Addr, d
 		}
 		hostIp = hostIpAddr
 
-		g.addToDnsCache(
+		g.dnsCache.Store(
 			domainName,
 			dnsCacheEntry{
 				Ip:         hostIpAddr,
@@ -179,18 +142,20 @@ func (g *GeoIpDatabase) GetDomainWithSmallestGeoDistance(clientIp *netip.Addr, d
 	}
 
 	clientIpStr := clientIp.String()
-	inCache, exists := g.getFromGeoDistanceCache(clientIpStr)
+	inCache, exists := g.geoDistanceCache.Load(clientIpStr)
 
 	defer func() {
-		for key, val := range g.geoDistanceCache {
-			if time.Since(val.InsertTime).Seconds() > float64(val.TTLSeconds) {
-				delete(g.geoDistanceCache, key)
+		g.geoDistanceCache.Range(func(key, value any) bool {
+			entry := value.(geoDistanceCacheEntry)
+			if time.Since(entry.InsertTime).Seconds() > float64(entry.TTLSeconds) {
+				g.geoDistanceCache.Delete(key)
 			}
-		}
+			return true
+		})
 	}()
 
 	if exists {
-		return inCache.Domain, nil
+		return inCache.(geoDistanceCacheEntry).Domain, nil
 	}
 
 	currentDomain := ""
@@ -207,7 +172,7 @@ func (g *GeoIpDatabase) GetDomainWithSmallestGeoDistance(clientIp *netip.Addr, d
 		}
 	}
 
-	g.addToGeoDistanceCache(
+	g.geoDistanceCache.Store(
 		clientIp.String(),
 		geoDistanceCacheEntry{
 			Domain:     currentDomain,
