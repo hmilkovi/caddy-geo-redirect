@@ -10,6 +10,10 @@
 This is a Caddy Server module that calculates Geo distance from client IP to provided domains IP
 and then redirect to the closes one to minimize latency. Kinda a alternative for latency based routing DNS.
 
+Make sure that module is used:
+```
+xcaddy build --with github.com/hmilkovi/caddy-geo-redirect
+```
 
 Example config:
 ```
