@@ -1,17 +1,25 @@
-# Caddy Server Latency based redirect
-This is a Caddy Server module that calculates Geo distance from client IP to provided domains
-and then redirect to the closes one to minimize latency.
+# Geo based redirect Caddy Server module
+[![MIT licensed][mit-badge]][mit-url]
+[![Build Status][actions-badge]][actions-url]
+
+[mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
+[mit-url]: https://github.com/hmilkovi/caddy-geo-redirect/blob/main/LICENSE
+[actions-badge]: https://github.com/hmilkovi/caddy-geo-redirect/actions/workflows/ci.yml/badge.svg?branch=main
+[actions-url]: https://github.com/hmilkovi/caddy-geo-redirect/actions/workflows/ci.yml
+
+This is a Caddy Server module that calculates Geo distance from client IP to provided domains IP
+and then redirect to the closes one to minimize latency. Kinda a alternative for latency based routing DNS.
 
 
 Example config:
 ```
 {
     debug
-    order latency_redirect first
+    order geo_based_redirect first
 }
 
 :8080 {
-    latency_redirect {
+    geo_based_redirect {
         mmdb_path /usr/local/share/GeoIP/GeoLite2-City.mmdb
         domain_names example.com myapp.net
         max_cache_size 100000
@@ -32,10 +40,11 @@ Example config:
 - Currently supports only IPv4
 - Has internal cache of Geo IP lookup so under big load it will start to miss cache and have bigget latency on first request
 - Loads GeoIP database in memory so size of it should fit in ram
+- CUrrently it doesn't support domains that resolve in multiple IP's (may add it in future)
 
 
 Example download Geo IP database from [IP Geolocation by DB-IP](https://db-ip.com):
 ```bash
 wget https://download.db-ip.com/free/dbip-city-lite-2025-09.mmdb.gz
 ```
-TO DO: Auto refresh periodically Geo IP database on diks
+TO DO: Auto refresh periodically Geo IP database on diks or implemenet update in Redis or Valkey

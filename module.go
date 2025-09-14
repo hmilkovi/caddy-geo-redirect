@@ -1,4 +1,4 @@
-package caddylatency
+package caddygeoredirect
 
 import (
 	"net"
@@ -14,12 +14,12 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"go.uber.org/zap"
 
-	"github.com/hmilkovi/caddy-latency/geoip"
+	"github.com/hmilkovi/caddy-geo-redirect/geoip"
 )
 
 func init() {
 	caddy.RegisterModule(Middleware{})
-	httpcaddyfile.RegisterHandlerDirective("latency_redirect", parseCaddyfile)
+	httpcaddyfile.RegisterHandlerDirective("geo_based_redirect", parseCaddyfile)
 }
 
 type Middleware struct {
@@ -32,7 +32,7 @@ type Middleware struct {
 
 func (Middleware) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
-		ID:  "http.handlers.latency_redirect",
+		ID:  "http.handlers.geo_based_redirect",
 		New: func() caddy.Module { return new(Middleware) },
 	}
 }

@@ -1,4 +1,4 @@
-module github.com/hmilkovi/caddy-latency
+module github.com/hmilkovi/caddy-geo-redirect
 
 go 1.25.1
 
