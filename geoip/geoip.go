@@ -62,7 +62,7 @@ func (g *GeoIpDatabase) StartCacheCleanup() {
 				entry := value.(geoDistanceCacheEntry)
 				if time.Since(entry.InsertTime).Seconds() > float64(entry.TTLSeconds) {
 					g.geoDistanceCache.Delete(key)
-					g.GeoDistanceCacheLen.Swap(g.GeoDistanceCacheLen.Load() - 1)
+					g.GeoDistanceCacheLen.Add(^uint64(0))
 				}
 				return true
 			})
@@ -70,7 +70,7 @@ func (g *GeoIpDatabase) StartCacheCleanup() {
 			g.dnsCache.Range(func(key, value any) bool {
 				entry := value.(dnsCacheEntry)
 				if time.Since(entry.InsertTime).Seconds() > 10 {
-					g.dnsCache.Delete(entry)
+					g.dnsCache.Delete(key)
 				}
 				return true
 			})
@@ -115,38 +115,44 @@ func HaversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
 	return 6371.0 * c
 }
 
-// DistanceFromClientIPtoDomainHost returns geo distance clietn IP and domain name geo locations in km on earth
-func (g *GeoIpDatabase) DistanceFromClientIPtoDomainHost(clientIp *netip.Addr, domainName string) (float64, error) {
-	clientLocation, err := g.getIPLatLong(clientIp)
-	if err != nil {
-		return 0, err
+// resolveDomain is a helper to encapsulate DNS resolution and caching
+func (g *GeoIpDatabase) resolveDomain(domainName string) (netip.Addr, error) {
+	if cached, exists := g.dnsCache.Load(domainName); exists {
+		return cached.(dnsCacheEntry).Ip, nil
 	}
 
-	var hostIp netip.Addr
-	cachedDNSEntry, exists := g.dnsCache.Load(domainName)
-	if exists {
-		hostIp = cachedDNSEntry.(dnsCacheEntry).Ip
-	} else {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		resolver := &net.Resolver{}
-		hostIps, err := resolver.LookupIP(ctx, "ip4", domainName)
-		if err != nil {
-			return 0, err
-		}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-		hostIp, ok := netip.AddrFromSlice(hostIps[0])
-		if !ok {
-			return 0, fmt.Errorf("failed to convert net.IP to netip.Addr: %s", hostIps[0].String())
-		}
+	hostIps, err := net.DefaultResolver.LookupIP(ctx, "ip4", domainName)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	if len(hostIps) == 0 {
+		return netip.Addr{}, fmt.Errorf("no IPs found for domain: %s", domainName)
+	}
 
-		g.dnsCache.Store(
-			domainName,
-			dnsCacheEntry{
-				Ip:         hostIp,
-				InsertTime: time.Now().UTC(),
-			},
-		)
+	hostIp, ok := netip.AddrFromSlice(hostIps[0])
+	if !ok {
+		return netip.Addr{}, fmt.Errorf("failed to convert net.IP to netip.Addr: %s", hostIps[0].String())
+	}
+
+	g.dnsCache.Store(
+		domainName,
+		dnsCacheEntry{
+			Ip:         hostIp,
+			InsertTime: time.Now().UTC(),
+		},
+	)
+
+	return hostIp, nil
+}
+
+// DistanceFromClientIPtoDomainHost returns geo distance clietn IP and domain name geo locations in km on earth
+func (g *GeoIpDatabase) DistanceFromClientIPtoDomainHost(clientLocation *GeoLocation, domainName string) (float64, error) {
+	hostIp, err := g.resolveDomain(domainName)
+	if err != nil {
+		return 0, err
 	}
 
 	hostLocation, err := g.getIPLatLong(&hostIp)
@@ -179,10 +185,15 @@ func (g *GeoIpDatabase) GetDomainWithSmallestGeoDistance(clientIp *netip.Addr, d
 		return inCache.(geoDistanceCacheEntry).Domain, nil
 	}
 
+	clientLocation, err := g.getIPLatLong(clientIp)
+	if err != nil {
+		return "", fmt.Errorf("failed to get client location: %w", err)
+	}
+
 	currentDomain := ""
 	currentDistance := math.MaxFloat64
 	for _, domain := range domainNames {
-		distance, err := g.DistanceFromClientIPtoDomainHost(clientIp, domain)
+		distance, err := g.DistanceFromClientIPtoDomainHost(clientLocation, domain)
 		if err != nil {
 			return "", err
 		}
