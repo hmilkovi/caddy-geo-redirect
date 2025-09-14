@@ -1,6 +1,7 @@
 package geoip
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"net"
@@ -93,7 +94,7 @@ func HaversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
 func (g *GeoIpDatabase) DistanceFromClientIPtoDomainHost(clientIp *netip.Addr, domainName string) (float64, error) {
 	clientLocation, err := g.getIPLatLong(clientIp)
 	if err != nil {
-		return -1, err
+		return 0, err
 	}
 
 	var hostIp netip.Addr
@@ -104,14 +105,17 @@ func (g *GeoIpDatabase) DistanceFromClientIPtoDomainHost(clientIp *netip.Addr, d
 			g.dnsCache.Delete(domainName)
 		}
 	} else {
-		hostIps, err := net.LookupIP(domainName)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		resolver := &net.Resolver{}
+		hostIps, err := resolver.LookupIP(ctx, "ip4", domainName)
 		if err != nil {
-			return -1, err
+			return 0, err
 		}
 
 		hostIpAddr, ok := netip.AddrFromSlice(hostIps[0])
 		if !ok {
-			return -1, fmt.Errorf("failed to convert net.IP to netip.Addr: %s", hostIps[0].String())
+			return 0, fmt.Errorf("failed to convert net.IP to netip.Addr: %s", hostIps[0].String())
 		}
 		hostIp = hostIpAddr
 
@@ -126,7 +130,7 @@ func (g *GeoIpDatabase) DistanceFromClientIPtoDomainHost(clientIp *netip.Addr, d
 
 	hostLocation, err := g.getIPLatLong(&hostIp)
 	if err != nil {
-		return -1, err
+		return 0, err
 	}
 
 	return HaversineDistance(
