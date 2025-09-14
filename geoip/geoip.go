@@ -53,6 +53,31 @@ func LoadDatabase(mmdbPath string, maxCacheSize int) (*GeoIpDatabase, error) {
 	}, nil
 }
 
+// StartCacheCleanup start the cleanup process for caches that clears cache every 10sec
+func (g *GeoIpDatabase) StartCacheCleanup() {
+	ticker := time.NewTicker(10 * time.Second)
+	go func() {
+		for range ticker.C {
+			g.geoDistanceCache.Range(func(key, value any) bool {
+				entry := value.(geoDistanceCacheEntry)
+				if time.Since(entry.InsertTime).Seconds() > float64(entry.TTLSeconds) {
+					g.geoDistanceCache.Delete(key)
+					g.GeoDistanceCacheLen.Swap(g.GeoDistanceCacheLen.Load() - 1)
+				}
+				return true
+			})
+
+			g.dnsCache.Range(func(key, value any) bool {
+				entry := value.(dnsCacheEntry)
+				if time.Since(entry.InsertTime).Seconds() > 10 {
+					g.dnsCache.Delete(entry)
+				}
+				return true
+			})
+		}
+	}()
+}
+
 // getIPLatLong lookups up lat,long geo data from mmdb database
 func (g *GeoIpDatabase) getIPLatLong(ip *netip.Addr) (*GeoLocation, error) {
 	record, err := g.database.City(*ip)
@@ -101,9 +126,6 @@ func (g *GeoIpDatabase) DistanceFromClientIPtoDomainHost(clientIp *netip.Addr, d
 	cachedDNSEntry, exists := g.dnsCache.Load(domainName)
 	if exists {
 		hostIp = cachedDNSEntry.(dnsCacheEntry).Ip
-		if time.Since(cachedDNSEntry.(dnsCacheEntry).InsertTime).Seconds() > 10 {
-			g.dnsCache.Delete(domainName)
-		}
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -113,16 +135,15 @@ func (g *GeoIpDatabase) DistanceFromClientIPtoDomainHost(clientIp *netip.Addr, d
 			return 0, err
 		}
 
-		hostIpAddr, ok := netip.AddrFromSlice(hostIps[0])
+		hostIp, ok := netip.AddrFromSlice(hostIps[0])
 		if !ok {
 			return 0, fmt.Errorf("failed to convert net.IP to netip.Addr: %s", hostIps[0].String())
 		}
-		hostIp = hostIpAddr
 
 		g.dnsCache.Store(
 			domainName,
 			dnsCacheEntry{
-				Ip:         hostIpAddr,
+				Ip:         hostIp,
 				InsertTime: time.Now().UTC(),
 			},
 		)
@@ -147,19 +168,12 @@ func (g *GeoIpDatabase) GetDomainWithSmallestGeoDistance(clientIp *netip.Addr, d
 		return "", fmt.Errorf("domain name list can not be empty, len: %d", len(domainNames))
 	}
 
+	if cacheTTLSec < 10 {
+		return "", fmt.Errorf("cache ttl can't be lower then 10 seconds: %d", cacheTTLSec)
+	}
+
 	clientIpStr := clientIp.String()
 	inCache, exists := g.geoDistanceCache.Load(clientIpStr)
-
-	defer func() {
-		g.geoDistanceCache.Range(func(key, value any) bool {
-			entry := value.(geoDistanceCacheEntry)
-			if time.Since(entry.InsertTime).Seconds() > float64(entry.TTLSeconds) {
-				g.geoDistanceCache.Delete(key)
-				g.GeoDistanceCacheLen.Swap(g.GeoDistanceCacheLen.Load() - 1)
-			}
-			return true
-		})
-	}()
 
 	if exists {
 		return inCache.(geoDistanceCacheEntry).Domain, nil

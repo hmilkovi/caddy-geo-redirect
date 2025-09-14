@@ -54,6 +54,7 @@ func (m *Middleware) Provision(ctx caddy.Context) error {
 	if err != nil {
 		return err
 	}
+	m.GeoIP.StartCacheCleanup()
 
 	return nil
 }
