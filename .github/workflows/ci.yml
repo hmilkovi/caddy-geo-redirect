@@ -2,15 +2,12 @@ name: Docker Image CI
 
 on:
   push:
-    branches: ["main"]
-  pull_request:
-    types: [closed]
-    branches: ["main"]
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -21,10 +18,14 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Extract tag as version
+        id: get_tag
+        run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/caddy-geo-redirect:latest
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/caddy-geo-redirect:${{ steps.get_tag.outputs.TAG }}
