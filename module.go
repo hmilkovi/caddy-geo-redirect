@@ -28,6 +28,7 @@ type Middleware struct {
 	MaxCacheSize    int      `json:"max_cache_size,omitempty"`
 	CacheTTLSeconds int      `json:"cache_ttl_seconds,omitempty"`
 	GeoIP           *geoip.GeoIpDatabase
+	logger          *zap.Logger
 }
 
 func (Middleware) CaddyModule() caddy.ModuleInfo {
@@ -39,6 +40,8 @@ func (Middleware) CaddyModule() caddy.ModuleInfo {
 
 func (m *Middleware) Provision(ctx caddy.Context) error {
 	caddy.Log().Named("http.handlers.latency_redirect").Info("Provision")
+	m.logger = ctx.Logger()
+
 	if m.MaxCacheSize == 0 {
 		m.MaxCacheSize = 100000 // default 100k
 	}
@@ -72,23 +75,21 @@ func (m *Middleware) Validate() error {
 }
 
 func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	log := caddy.Log().Named("latency_redirect")
-
 	// Someone is spoofing host header so skip it
 	if !slices.Contains(m.DomainNames, r.Host) {
-		log.Debug("Host not in domains list", zap.String("host", r.Host))
+		m.logger.Debug("Host not in domains list", zap.String("host", r.Host))
 		return next.ServeHTTP(w, r)
 	}
 
 	clientIP, err := netip.ParseAddr(r.RemoteAddr)
 	if err != nil {
-		log.Error("Can't parse remote address", zap.Error(err), zap.String("ip", r.RemoteAddr))
+		m.logger.Error("Can't parse remote address", zap.Error(err), zap.String("ip", r.RemoteAddr))
 		return next.ServeHTTP(w, r)
 	}
 
 	// We do not support IPv6 so we just skip it
 	if clientIP.Is6() && clientIP.IsPrivate() {
-		log.Debug("Found IPv6 or private ip skipping redirect check", zap.String("ip", clientIP.String()))
+		m.logger.Debug("Found IPv6 or private ip skipping redirect check", zap.String("ip", clientIP.String()))
 		return next.ServeHTTP(w, r)
 	}
 
@@ -99,15 +100,15 @@ func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 	)
 
 	if err != nil {
-		log.Error("failed to get ip distance", zap.Error(err))
+		m.logger.Error("failed to get ip distance", zap.Error(err))
 		return next.ServeHTTP(w, r)
 	}
 
 	if redirectDomain != r.Host {
-		log.Debug("Found domain that has smaller latency", zap.String("domain", redirectDomain))
+		m.logger.Debug("Found domain that has smaller latency", zap.String("domain", redirectDomain))
 		redirectFullUrl := r.URL
 		redirectFullUrl.Host = redirectDomain
-		log.Debug("Redirecting to", zap.String("url", redirectFullUrl.String()))
+		m.logger.Debug("Redirecting to", zap.String("url", redirectFullUrl.String()))
 		http.Redirect(w, r, redirectFullUrl.String(), http.StatusFound)
 	}
 
