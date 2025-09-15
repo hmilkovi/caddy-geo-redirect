@@ -1,10 +1,8 @@
 package geoip
 
 import (
-	"context"
 	"fmt"
 	"math"
-	"net"
 	"net/netip"
 	"sync"
 	"sync/atomic"
@@ -18,28 +16,31 @@ type GeoLocation struct {
 	Long float64
 }
 
-type geoDistanceCacheEntry struct {
+type GeoCacheEntry struct {
 	Domain     string
-	TTLSeconds int
+	TTLSec     int
 	InsertTime time.Time
 }
 
-type dnsCacheEntry struct {
-	Ip         netip.Addr
-	InsertTime time.Time
+// A struct to hold results from our concurrent lookups
+type distanceResult struct {
+	domain   string
+	distance float64
+	err      error
 }
 
 type GeoIpDatabase struct {
-	database            *geoip2.Reader
-	geoDistanceCache    sync.Map
-	GeoDistanceCacheLen *atomic.Uint64
-	maxCacheSize        int
-	dnsCache            sync.Map
+	database       *geoip2.Reader
+	cache          sync.Map
+	CacheLen       *atomic.Uint64
+	maxCacheSize   int
+	dnsClient      *DnsResolver
+	hostingDomains []string
 }
 
-// LoadDatabase loads mmdb in memory so we can reuse it
+// GeoIpDatabase loads mmdb in memory so we can reuse it
 // if mmdbPath is empty string we will by default use in memory DB-IP and download it every month
-func LoadDatabase(mmdbPath string, maxCacheSize int) (*GeoIpDatabase, error) {
+func NewGeoIpDatabase(mmdbPath string, maxCacheSize int, hostingDomains []string) (*GeoIpDatabase, error) {
 	var db *geoip2.Reader
 
 	db, err := geoip2.Open(mmdbPath)
@@ -48,8 +49,10 @@ func LoadDatabase(mmdbPath string, maxCacheSize int) (*GeoIpDatabase, error) {
 	}
 
 	return &GeoIpDatabase{
-		database:     db,
-		maxCacheSize: maxCacheSize,
+		database:       db,
+		maxCacheSize:   maxCacheSize,
+		dnsClient:      &DnsResolver{},
+		hostingDomains: hostingDomains,
 	}, nil
 }
 
@@ -58,19 +61,11 @@ func (g *GeoIpDatabase) StartCacheCleanup() {
 	ticker := time.NewTicker(10 * time.Second)
 	go func() {
 		for range ticker.C {
-			g.geoDistanceCache.Range(func(key, value any) bool {
-				entry := value.(geoDistanceCacheEntry)
-				if time.Since(entry.InsertTime).Seconds() > float64(entry.TTLSeconds) {
-					g.geoDistanceCache.Delete(key)
-					g.GeoDistanceCacheLen.Add(^uint64(0))
-				}
-				return true
-			})
-
-			g.dnsCache.Range(func(key, value any) bool {
-				entry := value.(dnsCacheEntry)
-				if time.Since(entry.InsertTime).Seconds() > 10 {
-					g.dnsCache.Delete(key)
+			g.cache.Range(func(key, value any) bool {
+				entry := value.(GeoCacheEntry)
+				if time.Since(entry.InsertTime).Seconds() > float64(entry.TTLSec) {
+					g.cache.Delete(key)
+					g.CacheLen.Add(^uint64(0))
 				}
 				return true
 			})
@@ -95,67 +90,14 @@ func (g *GeoIpDatabase) getIPLatLong(ip *netip.Addr) (*GeoLocation, error) {
 	}, nil
 }
 
-// HaversineDistance calculates the distance between two points on Earth.
-func HaversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
-	// Convert degrees to radians
-	lat1Rad := lat1 * math.Pi / 180
-	lon1Rad := lon1 * math.Pi / 180
-	lat2Rad := lat2 * math.Pi / 180
-	lon2Rad := lon2 * math.Pi / 180
-
-	// Calculate the difference in coordinates
-	diffLat := lat2Rad - lat1Rad
-	diffLon := lon2Rad - lon1Rad
-
-	// Apply the Haversine formula
-	a := math.Pow(math.Sin(diffLat/2), 2) + math.Cos(lat1Rad)*math.Cos(lat2Rad)*math.Pow(math.Sin(diffLon/2), 2)
-	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
-
-	// earthRadiusKm is the mean radius of Earth in kilometers is 6371.0
-	return 6371.0 * c
-}
-
-// resolveDomain is a helper to encapsulate DNS resolution and caching
-func (g *GeoIpDatabase) resolveDomain(domainName string) (netip.Addr, error) {
-	if cached, exists := g.dnsCache.Load(domainName); exists {
-		return cached.(dnsCacheEntry).Ip, nil
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	hostIps, err := net.DefaultResolver.LookupIP(ctx, "ip4", domainName)
-	if err != nil {
-		return netip.Addr{}, err
-	}
-	if len(hostIps) == 0 {
-		return netip.Addr{}, fmt.Errorf("no IPs found for domain: %s", domainName)
-	}
-
-	hostIp, ok := netip.AddrFromSlice(hostIps[0])
-	if !ok {
-		return netip.Addr{}, fmt.Errorf("failed to convert net.IP to netip.Addr: %s", hostIps[0].String())
-	}
-
-	g.dnsCache.Store(
-		domainName,
-		dnsCacheEntry{
-			Ip:         hostIp,
-			InsertTime: time.Now().UTC(),
-		},
-	)
-
-	return hostIp, nil
-}
-
 // DistanceFromClientIPtoDomainHost returns geo distance clietn IP and domain name geo locations in km on earth
 func (g *GeoIpDatabase) DistanceFromClientIPtoDomainHost(clientLocation *GeoLocation, domainName string) (float64, error) {
-	hostIp, err := g.resolveDomain(domainName)
+	hostIp, err := g.dnsClient.Resolve(domainName, 600)
 	if err != nil {
 		return 0, err
 	}
 
-	hostLocation, err := g.getIPLatLong(&hostIp)
+	hostLocation, err := g.getIPLatLong(hostIp)
 	if err != nil {
 		return 0, err
 	}
@@ -169,20 +111,16 @@ func (g *GeoIpDatabase) DistanceFromClientIPtoDomainHost(clientLocation *GeoLoca
 }
 
 // GetDomainWithSmallestGeoDistance returns domain name with smallest geo distance of ip it resolves and client ip
-func (g *GeoIpDatabase) GetDomainWithSmallestGeoDistance(clientIp *netip.Addr, domainNames []string, cacheTTLSec int) (string, error) {
-	if len(domainNames) == 0 {
-		return "", fmt.Errorf("domain name list can not be empty, len: %d", len(domainNames))
-	}
-
+func (g *GeoIpDatabase) GetDomainWithSmallestGeoDistance(clientIp *netip.Addr, cacheTTLSec int) (string, error) {
 	if cacheTTLSec < 10 {
 		return "", fmt.Errorf("cache ttl can't be lower then 10 seconds: %d", cacheTTLSec)
 	}
 
 	clientIpStr := clientIp.String()
-	inCache, exists := g.geoDistanceCache.Load(clientIpStr)
+	inCache, exists := g.cache.Load(clientIpStr)
 
 	if exists {
-		return inCache.(geoDistanceCacheEntry).Domain, nil
+		return inCache.(GeoCacheEntry).Domain, nil
 	}
 
 	clientLocation, err := g.getIPLatLong(clientIp)
@@ -190,31 +128,48 @@ func (g *GeoIpDatabase) GetDomainWithSmallestGeoDistance(clientIp *netip.Addr, d
 		return "", fmt.Errorf("failed to get client location: %w", err)
 	}
 
-	currentDomain := ""
-	currentDistance := math.MaxFloat64
-	for _, domain := range domainNames {
-		distance, err := g.DistanceFromClientIPtoDomainHost(clientLocation, domain)
-		if err != nil {
+	resultsChan := make(chan distanceResult, len(g.hostingDomains))
+	var wg sync.WaitGroup
+
+	wg.Add(len(g.hostingDomains))
+	for _, domain := range g.hostingDomains {
+		wg.Add(1)
+		go func(d string) {
+			defer wg.Done()
+			distance, err := g.DistanceFromClientIPtoDomainHost(clientLocation, d)
+			resultsChan <- distanceResult{domain: d, distance: distance, err: err}
+		}(domain)
+	}
+
+	wg.Wait()
+	close(resultsChan)
+
+	bestResult := distanceResult{
+		distance: math.MaxFloat64,
+		domain:   "",
+		err:      nil,
+	}
+	for result := range resultsChan {
+		if result.err != nil {
 			return "", err
 		}
 
-		if distance < currentDistance {
-			currentDistance = distance
-			currentDomain = domain
+		if result.distance < bestResult.distance {
+			bestResult = result
 		}
 	}
 
-	if int(g.GeoDistanceCacheLen.Load()) <= g.maxCacheSize {
-		g.GeoDistanceCacheLen.Add(1)
-		g.geoDistanceCache.Store(
+	if int(g.CacheLen.Load()) <= g.maxCacheSize {
+		g.CacheLen.Add(1)
+		g.cache.Store(
 			clientIp.String(),
-			geoDistanceCacheEntry{
-				Domain:     currentDomain,
-				TTLSeconds: cacheTTLSec,
+			GeoCacheEntry{
+				Domain:     bestResult.domain,
+				TTLSec:     cacheTTLSec,
 				InsertTime: time.Now().UTC(),
 			},
 		)
 	}
 
-	return currentDomain, nil
+	return bestResult.domain, nil
 }

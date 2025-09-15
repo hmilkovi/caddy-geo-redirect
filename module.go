@@ -50,7 +50,7 @@ func (m *Middleware) Provision(ctx caddy.Context) error {
 	}
 
 	var err error
-	m.GeoIP, err = geoip.LoadDatabase(m.MmdbPath, m.MaxCacheSize)
+	m.GeoIP, err = geoip.NewGeoIpDatabase(m.MmdbPath, m.MaxCacheSize, m.DomainNames)
 	if err != nil {
 		return err
 	}
@@ -95,7 +95,6 @@ func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 
 	redirectDomain, err := m.GeoIP.GetDomainWithSmallestGeoDistance(
 		&clientIP,
-		m.DomainNames,
 		m.CacheTTLSeconds,
 	)
 
@@ -109,7 +108,7 @@ func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 		redirectFullUrl := r.URL
 		redirectFullUrl.Host = redirectDomain
 		redirectFullUrlStr := redirectFullUrl.String()
-		m.logger.Debug("Redirecting to", zap.String("url", redirectFullUrlStr), zap.Uint64("cache_len", m.GeoIP.GeoDistanceCacheLen.Load()))
+		m.logger.Debug("Redirecting to", zap.String("url", redirectFullUrlStr), zap.Uint64("cache_len", m.GeoIP.CacheLen.Load()))
 		http.Redirect(w, r, redirectFullUrlStr, http.StatusFound)
 	}
 
