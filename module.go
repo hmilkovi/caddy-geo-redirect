@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"time"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
@@ -54,6 +55,7 @@ func (m *Middleware) Provision(ctx caddy.Context) error {
 	if err != nil {
 		return err
 	}
+	m.GeoIP.StartDomainLocationUpdater(time.Hour)
 	m.GeoIP.StartCacheCleanup()
 
 	return nil
