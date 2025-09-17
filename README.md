@@ -7,8 +7,14 @@
 [actions-badge]: https://github.com/hmilkovi/caddy-geo-redirect/actions/workflows/ci.yml/badge.svg?branch=main
 [actions-url]: https://github.com/hmilkovi/caddy-geo-redirect/actions/workflows/ci.yml
 
-This is a Caddy Server module that calculates Geo distance from client IP to provided domains IP
+A Caddy Server module that calculates Geo distance from client IP to provided domains IP
 and then redirect to the closes one to minimize latency. Kinda a alternative for latency based routing DNS.
+
+Features:
+- From a pool of domains, redirect users to the one with the closest geographical location to minimize latency
+- For each domain it periodically check's if DNS A record changed
+- For each domain it periodically check's health, slower service is better then dead service
+- Designed with performance in mind, it caches everything it can
 
 Make sure that module is used:
 ```
@@ -28,6 +34,7 @@ Example config:
         domain_names example.com myapp.net
         max_cache_size 100000
         cache_ttl_seconds 3600
+        health_uri /ping
     }
     respond "Hello from the server!"
 }

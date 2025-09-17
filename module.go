@@ -28,6 +28,7 @@ type Middleware struct {
 	DomainNames     []string `json:"domain_names,omitempty"`
 	MaxCacheSize    int      `json:"max_cache_size,omitempty"`
 	CacheTTLSeconds int      `json:"cache_ttl_seconds,omitempty"`
+	HealthUri       string   `json:"health_uri"`
 	GeoIP           *geoip.GeoIpDatabase
 	logger          *zap.Logger
 }
@@ -51,11 +52,11 @@ func (m *Middleware) Provision(ctx caddy.Context) error {
 	}
 
 	var err error
-	m.GeoIP, err = geoip.NewGeoIpDatabase(m.MmdbPath, m.MaxCacheSize, m.DomainNames)
+	m.GeoIP, err = geoip.NewGeoIpDatabase(m.logger, m.MmdbPath, m.MaxCacheSize, m.DomainNames, m.HealthUri)
 	if err != nil {
 		return err
 	}
-	m.GeoIP.StartDomainLocationUpdater(time.Hour)
+	m.GeoIP.StartDomainLocationAndHeathCheckUpdater(time.Hour)
 	m.GeoIP.StartCacheCleanup()
 
 	return nil
@@ -77,6 +78,11 @@ func (m *Middleware) Validate() error {
 }
 
 func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+	// We don't want to redirect on health check path
+	if r.URL.Path == m.HealthUri {
+		return next.ServeHTTP(w, r)
+	}
+
 	// Someone is spoofing host header so skip it
 	if !slices.Contains(m.DomainNames, r.Host) {
 		m.logger.Debug("Host not in domains list", zap.String("host", r.Host))
@@ -152,6 +158,11 @@ func (m *Middleware) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					return d.Errf("invalid integer for cache_ttl_seconds: %v", err)
 				}
 				m.CacheTTLSeconds = ttlSeconds
+			case "health_uri":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				m.HealthUri = d.Val()
 			default:
 				return d.Errf("unrecognized subdirective '%s'", d.Val())
 			}
