@@ -7,8 +7,7 @@
 [actions-badge]: https://github.com/hmilkovi/caddy-geo-redirect/actions/workflows/ci.yml/badge.svg?branch=main
 [actions-url]: https://github.com/hmilkovi/caddy-geo-redirect/actions/workflows/ci.yml
 
-A Caddy Server module that calculates Geo distance from client IP to provided domains IP
-and then redirect to the closes one to minimize latency. Kinda a alternative for latency based routing DNS.
+This Caddy server module provides a latency-aware alternative to traditional latency-based DNS routing. It works by calculating the geographical distance between the client's IP address and a list of target domain IPs. It then redirects the client to the closest server, minimizing network latency and improving user experience.
 
 ## Features:
 - From a pool of domains, redirect users to the one with the closest geographical location to minimize latency
