@@ -10,7 +10,7 @@
 A Caddy Server module that calculates Geo distance from client IP to provided domains IP
 and then redirect to the closes one to minimize latency. Kinda a alternative for latency based routing DNS.
 
-Features:
+## Features:
 - From a pool of domains, redirect users to the one with the closest geographical location to minimize latency
 - For each domain it periodically check's if DNS A record changed
 - For each domain it periodically check's health, slower service is better then dead service
