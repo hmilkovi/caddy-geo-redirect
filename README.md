@@ -62,7 +62,7 @@ Example config:
 - Currently supports only IPv4
 - Has internal cache of Geo IP lookup so under big load it will start to miss cache and have bigget latency on first request
 - Loads GeoIP database in memory so size of it should fit in ram
-- CUrrently it doesn't support domains that resolve in multiple IP's (may add it in future)
+- Currently it doesn't support domains that resolve in multiple IP's (may add it in future)
 
 
 Example download Geo IP city database from [MaxMind's GeoLite2](https://dev.maxmind.com/geoip/geoip2/geolite2/):
