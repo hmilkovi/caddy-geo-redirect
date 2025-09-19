@@ -272,8 +272,6 @@ github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8m
 github.com/neelance/astrewrite v0.0.0-20160511093645-99348263ae86/go.mod h1:kHJEU3ofeGjhHklVoIGuVj85JJwZ6kWPaJwCIxgnFmo=
 github.com/neelance/sourcemap v0.0.0-20151028013722-8c68805598ab/go.mod h1:Qr6/a/Q4r9LP1IltGz7tA7iOK1WonHEYhu1HRBA7ZiM=
 github.com/openzipkin/zipkin-go v0.1.1/go.mod h1:NtoC/o8u3JlF1lSlyPNswIbeQH9bJTmOf0Erfk+hxe8=
-github.com/oschwald/geoip2-golang/v2 v2.0.0-beta.4 h1:O5fVXaiCQ1t1284iEGPHaMSqOfjBqWig7NOD6WIQkxA=
-github.com/oschwald/geoip2-golang/v2 v2.0.0-beta.4/go.mod h1:fHGWi8nhf3ZNFPE09LPwp7p2ABZoc5XXx6VY5mIBNNw=
 github.com/oschwald/maxminddb-golang/v2 v2.0.0-beta.9 h1:Fc8OfrOEHSDsxEe2MOsNz/7Wq4MNBJczl1/B/+/5k2I=
 github.com/oschwald/maxminddb-golang/v2 v2.0.0-beta.9/go.mod h1:EkyB0XWibbE1/+tXyR+ZehlGg66bRtMzxQSPotYH2EA=
 github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 h1:onHthvaw9LFnH4t2DcNVpwGmV9E1BkGknEliJkfwQj0=

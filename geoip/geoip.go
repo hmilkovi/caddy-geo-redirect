@@ -8,11 +8,12 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/oschwald/geoip2-golang/v2"
+	"github.com/oschwald/maxminddb-golang/v2"
 	"go.uber.org/zap"
 )
 
@@ -32,42 +33,108 @@ type DomainGeoLocation struct {
 	IsAlive bool
 }
 
+type MMDBLocation struct {
+	Location struct {
+		Latitude  float64 `maxminddb:"latitude"`
+		Longitude float64 `maxminddb:"longitude"`
+	} `maxminddb:"location"`
+}
+
 type GeoIpDatabase struct {
-	database            *geoip2.Reader
-	cache               sync.Map
-	CacheLen            *atomic.Uint64
-	maxCacheSize        int
-	domainLocations     map[string]*DomainGeoLocation
-	domainLocationsLock sync.RWMutex
-	hostingDomains      []string
-	healthUri           string
-	logger              *zap.Logger
+	databasePath           string
+	database               *maxminddb.Reader
+	databaseUri            string
+	databaseLock           sync.RWMutex
+	periodicDbDownloadDays int
+	cache                  sync.Map
+	CacheLen               *atomic.Uint64
+	maxCacheSize           int
+	domainLocations        map[string]*DomainGeoLocation
+	domainLocationsLock    sync.RWMutex
+	hostingDomains         []string
+	healthUri              string
+	logger                 *zap.Logger
+}
+
+type NewGeoIpDatabaseArgs struct {
+	Logger                   *zap.Logger
+	MmdbPathUri              string
+	MmdbPath                 string
+	MmdbPeriodicDownloadDays int
+	MaxCacheSize             int
+	HostingDomains           []string
+	HealthUri                string
 }
 
 // GeoIpDatabase loads mmdb in memory so we can reuse it
 // if mmdbPath is empty string we will by default use in memory DB-IP and download it every month
-func NewGeoIpDatabase(logger *zap.Logger, mmdbPath string, maxCacheSize int, hostingDomains []string, healthUri string) (*GeoIpDatabase, error) {
-	var db *geoip2.Reader
-
-	db, err := geoip2.Open(mmdbPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load geoip db: %w", err)
+func NewGeoIpDatabase(args *NewGeoIpDatabaseArgs) (*GeoIpDatabase, error) {
+	geoIpDb := &GeoIpDatabase{
+		databasePath:           args.MmdbPath,
+		databaseUri:            args.MmdbPathUri,
+		periodicDbDownloadDays: args.MmdbPeriodicDownloadDays,
+		maxCacheSize:           args.MaxCacheSize,
+		hostingDomains:         args.HostingDomains,
+		domainLocations:        make(map[string]*DomainGeoLocation),
+		CacheLen:               &atomic.Uint64{},
+		healthUri:              args.HealthUri,
+		logger:                 args.Logger,
 	}
 
-	geoIpDb := &GeoIpDatabase{
-		database:        db,
-		maxCacheSize:    maxCacheSize,
-		hostingDomains:  hostingDomains,
-		domainLocations: make(map[string]*DomainGeoLocation),
-		CacheLen:        &atomic.Uint64{},
-		healthUri:       healthUri,
-		logger:          logger,
+	if err := geoIpDb.syncDatabase(); err != nil {
+		return nil, err
 	}
 
 	geoIpDb.updateDomainLocations()
-	geoIpDb.updateDomainHealthState()
 
 	return geoIpDb, nil
+}
+
+// syncDatabase checks if mmdb can and should be downloaded then reads it from disk
+func (g *GeoIpDatabase) syncDatabase() error {
+	shouldDownload := false
+	dbFilestat, err := os.Stat(g.databasePath)
+	if err != nil {
+		shouldDownload = true
+	} else if time.Since(dbFilestat.ModTime()).Hours()/24 >= float64(g.periodicDbDownloadDays) {
+		shouldDownload = true
+	}
+
+	if g.databaseUri == "" {
+		shouldDownload = false
+	}
+
+	if g.periodicDbDownloadDays == 0 {
+		shouldDownload = false
+	}
+
+	if shouldDownload {
+		if err := downloadGeoDB(g.databaseUri, g.databasePath); err != nil {
+			return err
+		}
+	}
+
+	db, err := maxminddb.Open(g.databasePath)
+	if err != nil {
+		return fmt.Errorf("failed to load geoip db: %w", err)
+	}
+
+	g.databaseLock.Lock()
+	g.database = db
+	g.databaseLock.Unlock()
+
+	return nil
+}
+
+func (g *GeoIpDatabase) StartPeriodicGeoDBSyncer() {
+	tickerLoc := time.NewTicker(24 * time.Hour)
+	go func() {
+		for range tickerLoc.C {
+			if err := g.syncDatabase(); err != nil {
+				g.logger.Error("failed to sync geo ip database", zap.Error(err))
+			}
+		}
+	}()
 }
 
 // updateDomainHealthState makes a health check request to domain
@@ -96,7 +163,7 @@ func (g *GeoIpDatabase) updateDomainHealthState() {
 		if err != nil {
 			location.IsAlive = false
 			newLocations[domain] = location
-			g.logger.Error("failed helath check", zap.String("domain", domain), zap.Error(err))
+			g.logger.Error("failed health check", zap.String("domain", domain), zap.Error(err))
 			continue
 		}
 
@@ -108,7 +175,7 @@ func (g *GeoIpDatabase) updateDomainHealthState() {
 			location.IsAlive = true
 		} else {
 			location.IsAlive = false
-			g.logger.Error("failed helath check", zap.String("domain", domain), zap.Int("code", resp.StatusCode))
+			g.logger.Error("failed health check", zap.String("domain", domain), zap.Int("code", resp.StatusCode))
 		}
 
 		newLocations[domain] = location
@@ -203,18 +270,17 @@ func (g *GeoIpDatabase) StartCacheCleanup() {
 
 // getIPLatLong lookups up lat,long geo data from mmdb database
 func (g *GeoIpDatabase) getIPLatLong(ip *netip.Addr) (*GeoLocation, error) {
-	record, err := g.database.City(*ip)
-	if err != nil {
+	g.databaseLock.RLock()
+	defer g.databaseLock.RUnlock()
+
+	var record MMDBLocation
+	if err := g.database.Lookup(*ip).Decode(&record); err != nil {
 		return nil, fmt.Errorf("failed ip lookup: %w", err)
 	}
 
-	if !record.HasData() {
-		return nil, fmt.Errorf("no data found for this IP: %s", ip.String())
-	}
-
 	return &GeoLocation{
-		Lat:  *record.Location.Latitude,
-		Long: *record.Location.Longitude,
+		Lat:  record.Location.Latitude,
+		Long: record.Location.Longitude,
 	}, nil
 }
 

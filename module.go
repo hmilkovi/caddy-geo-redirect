@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -13,6 +14,7 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
 	"github.com/hmilkovi/caddy-geo-redirect/geoip"
@@ -24,13 +26,16 @@ func init() {
 }
 
 type Middleware struct {
-	MmdbPath        string   `json:"mmdb_path,omitempty"`
-	DomainNames     []string `json:"domain_names,omitempty"`
-	MaxCacheSize    int      `json:"max_cache_size,omitempty"`
-	CacheTTLSeconds int      `json:"cache_ttl_seconds,omitempty"`
-	HealthUri       string   `json:"health_uri"`
-	GeoIP           *geoip.GeoIpDatabase
-	logger          *zap.Logger
+	MmdbPath               string   `json:"mmdb_path,omitempty"`
+	MmdbUri                string   `json:"mmdb_uri,omitempty"`
+	MmdbDownloadPeriodDays int      `json:"mmdb_download_period_days,omitempty"`
+	DomainNames            []string `json:"domain_names,omitempty"`
+	MaxCacheSize           int      `json:"max_cache_size,omitempty"`
+	CacheTTLSeconds        int      `json:"cache_ttl_seconds,omitempty"`
+	HealthUri              string   `json:"health_uri,omitempty"`
+	GeoIP                  *geoip.GeoIpDatabase
+	logger                 *zap.Logger
+	redirectCounterMetrics *prometheus.CounterVec
 }
 
 func (Middleware) CaddyModule() caddy.ModuleInfo {
@@ -44,20 +49,48 @@ func (m *Middleware) Provision(ctx caddy.Context) error {
 	m.logger = ctx.Logger()
 
 	if m.MaxCacheSize == 0 {
-		m.MaxCacheSize = 100000 // default 100k
+		m.MaxCacheSize = 100000
 	}
 
 	if m.CacheTTLSeconds == 0 {
-		m.CacheTTLSeconds = 60 * 10 // default 10 minutes
+		m.CacheTTLSeconds = 60 * 10
+	}
+
+	if m.MmdbDownloadPeriodDays == 0 {
+		m.MmdbDownloadPeriodDays = 30
 	}
 
 	var err error
-	m.GeoIP, err = geoip.NewGeoIpDatabase(m.logger, m.MmdbPath, m.MaxCacheSize, m.DomainNames, m.HealthUri)
+	m.GeoIP, err = geoip.NewGeoIpDatabase(
+		&geoip.NewGeoIpDatabaseArgs{
+			Logger:         m.logger,
+			MmdbPathUri:    m.HealthUri,
+			MmdbPath:       m.MmdbPath,
+			MaxCacheSize:   m.MaxCacheSize,
+			HostingDomains: m.DomainNames,
+			HealthUri:      m.HealthUri,
+		},
+	)
 	if err != nil {
 		return err
 	}
 	m.GeoIP.StartDomainLocationAndHeathCheckUpdater(time.Hour)
 	m.GeoIP.StartCacheCleanup()
+
+	if m.MmdbUri != "" && m.MmdbDownloadPeriodDays > 0 {
+		m.GeoIP.StartPeriodicGeoDBSyncer()
+	}
+
+	m.redirectCounterMetrics = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "geo_based_redirect",
+			Help: "Number of redirects to closer server",
+		},
+		[]string{"status"},
+	)
+	m.redirectCounterMetrics.WithLabelValues("failed")
+	m.redirectCounterMetrics.WithLabelValues("success")
+	ctx.GetMetricsRegistry().MustRegister(m.redirectCounterMetrics)
 
 	return nil
 }
@@ -70,7 +103,13 @@ func (m *Middleware) Validate() error {
 		}
 	}
 
-	if _, err := os.Stat(m.MmdbPath); os.IsNotExist(err) {
+	if m.HealthUri != "" {
+		if _, err := url.ParseRequestURI(m.HealthUri); err != nil {
+			return err
+		}
+	}
+
+	if _, err := os.Stat(m.MmdbPath); os.IsNotExist(err) && m.HealthUri == "" {
 		return err
 	}
 
@@ -108,6 +147,7 @@ func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 
 	if err != nil {
 		m.logger.Error("failed to get ip distance", zap.Error(err))
+		m.redirectCounterMetrics.WithLabelValues("failed").Inc()
 		return next.ServeHTTP(w, r)
 	}
 
@@ -117,6 +157,7 @@ func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 		redirectFullUrl.Host = redirectDomain
 		redirectFullUrlStr := redirectFullUrl.String()
 		m.logger.Debug("Redirecting to", zap.String("url", redirectFullUrlStr), zap.Uint64("cache_len", m.GeoIP.CacheLen.Load()))
+		m.redirectCounterMetrics.WithLabelValues("success").Inc()
 		http.Redirect(w, r, redirectFullUrlStr, http.StatusFound)
 	}
 
@@ -135,6 +176,20 @@ func (m *Middleware) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					return d.ArgErr()
 				}
 				m.MmdbPath = d.Val()
+			case "mmdb_uri":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				m.MmdbPath = d.Val()
+			case "mmdb_download_period_days":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				size, err := strconv.Atoi(d.Val())
+				if err != nil {
+					return d.Errf("invalid integer for mmdb_download_period_days: %v", err)
+				}
+				m.MmdbDownloadPeriodDays = size
 			case "domain_names":
 				m.DomainNames = d.RemainingArgs()
 				if len(m.DomainNames) == 0 {

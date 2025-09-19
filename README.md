@@ -13,6 +13,7 @@ This Caddy server module provides a latency-aware alternative to traditional lat
 - From a pool of domains, redirect users to the one with the closest geographical location to minimize latency
 - For each domain it periodically check's if DNS A record changed
 - For each domain it periodically check's health, slower service is better then dead service
+- Ability to periodically sync geo ip database
 - Designed with performance in mind, it caches everything it can
 
 Make sure that module is used:
@@ -24,12 +25,15 @@ Example config:
 ```
 {
     debug
+    metrics
     order geo_based_redirect first
 }
 
 :8080 {
     geo_based_redirect {
+        mmdb_uri https://git.io/GeoLite2-City.mmdb
         mmdb_path /usr/local/share/GeoIP/GeoLite2-City.mmdb
+        mmdb_download_period_days 14
         domain_names example.com myapp.net
         max_cache_size 100000
         cache_ttl_seconds 3600
@@ -38,6 +42,10 @@ Example config:
     respond "Hello from the server!"
 }
 ```
+- `mmdb_uri` optional uri from where we will download geo ip database, also supports gziped mmdb
+
+- `mmdb_download_period_days` download interval in days to download mmdb geo ip database
+
 - `mmdb_path` sets the file path for the GeoIP database.
 
 - `domain_names` specifies a list of domain names ex. `eu.example.com us.example.com`.
@@ -46,6 +54,10 @@ Example config:
 
 - `cache_ttl_seconds` defines the cache entry's time-to-live (TTL) in seconds, default 10 minutes
 
+- `health_uri` health check http path ex. `/ping`
+
+
+
 ## Limitations
 - Currently supports only IPv4
 - Has internal cache of Geo IP lookup so under big load it will start to miss cache and have bigget latency on first request
@@ -53,8 +65,7 @@ Example config:
 - CUrrently it doesn't support domains that resolve in multiple IP's (may add it in future)
 
 
-Example download Geo IP database from [IP Geolocation by DB-IP](https://db-ip.com):
+Example download Geo IP city database from [MaxMind's GeoLite2](https://dev.maxmind.com/geoip/geoip2/geolite2/):
 ```bash
-wget https://download.db-ip.com/free/dbip-city-lite-2025-09.mmdb.gz
+wget https://git.io/GeoLite2-City.mmdb
 ```
-TO DO: Auto refresh periodically Geo IP database on diks or implemenet update in Redis or Valkey
