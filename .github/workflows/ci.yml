@@ -28,4 +28,4 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/caddy-geo-redirect:${{ steps.get_tag.outputs.TAG }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/caddy-geo-redirect:${{ steps.get_tag.outputs.TAG }}, ${{ secrets.DOCKERHUB_USERNAME }}/caddy-geo-redirect:latest
