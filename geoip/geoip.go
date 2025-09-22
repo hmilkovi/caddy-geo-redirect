@@ -92,9 +92,11 @@ func NewGeoIpDatabase(args *NewGeoIpDatabaseArgs) (*GeoIpDatabase, error) {
 
 // syncDatabase checks if mmdb can and should be downloaded then reads it from disk
 func (g *GeoIpDatabase) syncDatabase() error {
-	shouldDownload := false
 	dbFilestat, err := os.Stat(g.databasePath)
+	shouldDownload := false
 	if err != nil {
+		shouldDownload = true
+	} else if dbFilestat.IsDir() {
 		shouldDownload = true
 	} else if time.Since(dbFilestat.ModTime()).Hours()/24 >= float64(g.periodicDbDownloadDays) {
 		shouldDownload = true

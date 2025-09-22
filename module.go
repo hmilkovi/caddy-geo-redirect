@@ -63,12 +63,13 @@ func (m *Middleware) Provision(ctx caddy.Context) error {
 	var err error
 	m.GeoIP, err = geoip.NewGeoIpDatabase(
 		&geoip.NewGeoIpDatabaseArgs{
-			Logger:         m.logger,
-			MmdbPathUri:    m.HealthUri,
-			MmdbPath:       m.MmdbPath,
-			MaxCacheSize:   m.MaxCacheSize,
-			HostingDomains: m.DomainNames,
-			HealthUri:      m.HealthUri,
+			Logger:                   m.logger,
+			MmdbPathUri:              m.MmdbUri,
+			MmdbPath:                 m.MmdbPath,
+			MmdbPeriodicDownloadDays: m.MmdbDownloadPeriodDays,
+			MaxCacheSize:             m.MaxCacheSize,
+			HostingDomains:           m.DomainNames,
+			HealthUri:                m.HealthUri,
 		},
 	)
 	if err != nil {
@@ -109,7 +110,7 @@ func (m *Middleware) Validate() error {
 		}
 	}
 
-	if _, err := os.Stat(m.MmdbPath); os.IsNotExist(err) && m.HealthUri == "" {
+	if _, err := os.Stat(m.MmdbPath); os.IsNotExist(err) && m.MmdbUri == "" {
 		return err
 	}
 
@@ -180,7 +181,7 @@ func (m *Middleware) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				if !d.NextArg() {
 					return d.ArgErr()
 				}
-				m.MmdbPath = d.Val()
+				m.MmdbUri = d.Val()
 			case "mmdb_download_period_days":
 				if !d.NextArg() {
 					return d.ArgErr()
