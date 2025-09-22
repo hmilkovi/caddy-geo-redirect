@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
@@ -129,7 +130,7 @@ func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 		return next.ServeHTTP(w, r)
 	}
 
-	clientIP, err := netip.ParseAddr(r.RemoteAddr)
+	clientIP, err := netip.ParseAddr(strings.Split(r.RemoteAddr, ":")[0])
 	if err != nil {
 		m.logger.Error("Can't parse remote address", zap.Error(err), zap.String("ip", r.RemoteAddr))
 		return next.ServeHTTP(w, r)
