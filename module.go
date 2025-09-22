@@ -130,9 +130,10 @@ func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 		return next.ServeHTTP(w, r)
 	}
 
-	clientIP, err := netip.ParseAddr(strings.Split(r.RemoteAddr, ":")[0])
+	ipStr := strings.Split(r.RemoteAddr, ":")[0]
+	clientIP, err := netip.ParseAddr(ipStr)
 	if err != nil {
-		m.logger.Error("Can't parse remote address", zap.Error(err), zap.String("ip", r.RemoteAddr))
+		m.logger.Error("Can't parse remote address", zap.Error(err), zap.String("ip", ipStr))
 		return next.ServeHTTP(w, r)
 	}
 
