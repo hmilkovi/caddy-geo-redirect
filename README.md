@@ -54,7 +54,7 @@ Example config:
 
 - `cache_ttl_seconds` defines the cache entry's time-to-live (TTL) in seconds, default 10 minutes
 
-- `health_uri` health check http path ex. `/ping`
+- `health_uri` health check http path ex. `/ping` with linear back-off 1,2,3,4 seconds
 
 
 

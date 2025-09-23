@@ -160,24 +160,30 @@ func (g *GeoIpDatabase) updateDomainHealthState() {
 			Host:   domain,
 			Path:   g.healthUri,
 		}
-		resp, err := client.Get(uri.String())
 
-		if err != nil {
-			location.IsAlive = false
-			newLocations[domain] = location
-			g.logger.Error("failed health check", zap.String("domain", domain), zap.Error(err))
-			continue
-		}
+		for i := range 4 {
+			resp, err := client.Get(uri.String())
 
-		if resp == nil {
-			continue
-		}
+			if err != nil {
+				location.IsAlive = false
+				newLocations[domain] = location
+				g.logger.Error("failed health check", zap.String("domain", domain), zap.Error(err))
+				time.Sleep(time.Duration(i+1) * time.Second)
+				continue
+			}
 
-		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-			location.IsAlive = true
-		} else {
-			location.IsAlive = false
-			g.logger.Error("failed health check", zap.String("domain", domain), zap.Int("code", resp.StatusCode))
+			if resp == nil {
+				continue
+			}
+
+			if resp.StatusCode >= 200 && resp.StatusCode < 400 {
+				location.IsAlive = true
+				break
+			} else {
+				location.IsAlive = false
+				g.logger.Error("failed health check", zap.String("domain", domain), zap.Int("code", resp.StatusCode))
+				time.Sleep(time.Duration(i+1) * time.Second)
+			}
 		}
 
 		newLocations[domain] = location
