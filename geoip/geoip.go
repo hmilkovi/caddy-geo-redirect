@@ -173,7 +173,7 @@ func (g *GeoIpDatabase) updateDomainHealthState() {
 			continue
 		}
 
-		if resp.StatusCode > 200 && resp.StatusCode < 400 {
+		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 			location.IsAlive = true
 		} else {
 			location.IsAlive = false
