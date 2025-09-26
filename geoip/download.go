@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// downloadGeoDB fetches geo ip database and saves it on given filepath
 func downloadGeoDB(uri string, filepath string) error {
 	client := &http.Client{
 		Timeout: 30 * time.Second,

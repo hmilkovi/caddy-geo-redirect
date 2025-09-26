@@ -10,11 +10,9 @@ func HaversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
 	lat2Rad := lat2 * math.Pi / 180
 	lon2Rad := lon2 * math.Pi / 180
 
-	// Calculate the difference in coordinates
 	diffLat := lat2Rad - lat1Rad
 	diffLon := lon2Rad - lon1Rad
 
-	// Apply the Haversine formula
 	a := math.Pow(math.Sin(diffLat/2), 2) + math.Cos(lat1Rad)*math.Cos(lat2Rad)*math.Pow(math.Sin(diffLon/2), 2)
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 
