@@ -294,14 +294,13 @@ func (g *GeoIpDatabase) getIPLatLong(ip *netip.Addr) (*GeoLocation, error) {
 
 // GetDomainWithSmallestGeoDistance returns domain name with smallest geo distance of ip it resolves and client ip
 func (g *GeoIpDatabase) GetDomainWithSmallestGeoDistance(clientIpStr string, cacheTTLSec int) (string, error) {
-	if cacheTTLSec < 10 {
-		return "", fmt.Errorf("cache ttl can't be lower then 10 seconds: %d", cacheTTLSec)
-	}
-
 	inCache, exists := g.cache.Load(clientIpStr)
-
 	if exists {
 		return inCache.(GeoCacheEntry).Domain, nil
+	}
+
+	if cacheTTLSec < 10 {
+		return "", fmt.Errorf("cache ttl can't be lower then 10 seconds: %d", cacheTTLSec)
 	}
 
 	clientIp, err := netip.ParseAddr(clientIpStr)

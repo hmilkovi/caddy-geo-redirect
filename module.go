@@ -19,6 +19,8 @@ import (
 	"github.com/hmilkovi/caddy-geo-redirect/geoip"
 )
 
+const acmePrefix = "/.well-known/acme-challenge"
+
 func init() {
 	caddy.RegisterModule(Middleware{})
 	httpcaddyfile.RegisterHandlerDirective("geo_based_redirect", parseCaddyfile)
@@ -124,7 +126,7 @@ func (m *Middleware) Validate() error {
 
 func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	// We don't want to redirect on health check path or ACME protocol DV
-	if r.URL.Path == m.HealthUri || strings.Contains(r.URL.Path, "/.well-known/acme-challenge") {
+	if r.URL.Path == m.HealthUri || strings.HasPrefix(r.URL.Path, acmePrefix) {
 		return next.ServeHTTP(w, r)
 	}
 
@@ -134,8 +136,9 @@ func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 		return next.ServeHTTP(w, r)
 	}
 
+	ipStr, _, _ := strings.Cut(r.RemoteAddr, ":")
 	redirectDomain, err := m.GeoIP.GetDomainWithSmallestGeoDistance(
-		strings.Split(r.RemoteAddr, ":")[0],
+		ipStr,
 		m.CacheTTLSeconds,
 	)
 
