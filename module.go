@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -30,9 +29,10 @@ type Middleware struct {
 	MmdbUri                string   `json:"mmdb_uri,omitempty"`
 	MmdbDownloadPeriodDays int      `json:"mmdb_download_period_days,omitempty"`
 	DomainNames            []string `json:"domain_names,omitempty"`
-	MaxCacheSize           int      `json:"max_cache_size,omitempty"`
-	CacheTTLSeconds        int      `json:"cache_ttl_seconds,omitempty"`
-	HealthUri              string   `json:"health_uri,omitempty"`
+	domainNamesMap         map[string]int
+	MaxCacheSize           int    `json:"max_cache_size,omitempty"`
+	CacheTTLSeconds        int    `json:"cache_ttl_seconds,omitempty"`
+	HealthUri              string `json:"health_uri,omitempty"`
 	GeoIP                  *geoip.GeoIpDatabase
 	logger                 *zap.Logger
 	redirectCounterMetrics *prometheus.CounterVec
@@ -58,6 +58,11 @@ func (m *Middleware) Provision(ctx caddy.Context) error {
 
 	if m.MmdbDownloadPeriodDays == 0 {
 		m.MmdbDownloadPeriodDays = 30
+	}
+
+	m.domainNamesMap = make(map[string]int)
+	for _, domain := range m.DomainNames {
+		m.domainNamesMap[domain] = 1
 	}
 
 	var err error
@@ -124,7 +129,7 @@ func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 	}
 
 	// Someone is spoofing host header so skip it
-	if !slices.Contains(m.DomainNames, r.Host) {
+	if _, exists := m.domainNamesMap[r.Host]; !exists {
 		m.logger.Debug("Host not in domains list", zap.String("host", r.Host))
 		return next.ServeHTTP(w, r)
 	}
