@@ -124,7 +124,7 @@ func (m *Middleware) Validate() error {
 
 func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	// We don't want to redirect on health check path
-	if r.URL.Path == m.HealthUri {
+	if r.URL.Path == m.HealthUri || strings.Contains(r.URL.Path, "/.well-known/acme-challenge") {
 		return next.ServeHTTP(w, r)
 	}
 
