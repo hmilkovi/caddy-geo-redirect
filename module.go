@@ -3,7 +3,6 @@ package caddygeoredirect
 import (
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"os"
 	"slices"
@@ -130,26 +129,13 @@ func (m Middleware) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddy
 		return next.ServeHTTP(w, r)
 	}
 
-	ipStr := strings.Split(r.RemoteAddr, ":")[0]
-	clientIP, err := netip.ParseAddr(ipStr)
-	if err != nil {
-		m.logger.Error("Can't parse remote address", zap.Error(err), zap.String("ip", ipStr))
-		return next.ServeHTTP(w, r)
-	}
-
-	// We do not support IPv6 so we just skip it
-	if clientIP.Is6() && clientIP.IsPrivate() {
-		m.logger.Debug("Found IPv6 or private ip skipping redirect check", zap.String("ip", clientIP.String()))
-		return next.ServeHTTP(w, r)
-	}
-
 	redirectDomain, err := m.GeoIP.GetDomainWithSmallestGeoDistance(
-		&clientIP,
+		strings.Split(r.RemoteAddr, ":")[0],
 		m.CacheTTLSeconds,
 	)
 
 	if err != nil {
-		m.logger.Error("failed to get ip distance", zap.Error(err))
+		m.logger.Warn("failed to get ip distance", zap.Error(err))
 		m.redirectCounterMetrics.WithLabelValues("failed").Inc()
 		return next.ServeHTTP(w, r)
 	}

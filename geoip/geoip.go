@@ -293,19 +293,28 @@ func (g *GeoIpDatabase) getIPLatLong(ip *netip.Addr) (*GeoLocation, error) {
 }
 
 // GetDomainWithSmallestGeoDistance returns domain name with smallest geo distance of ip it resolves and client ip
-func (g *GeoIpDatabase) GetDomainWithSmallestGeoDistance(clientIp *netip.Addr, cacheTTLSec int) (string, error) {
+func (g *GeoIpDatabase) GetDomainWithSmallestGeoDistance(clientIpStr string, cacheTTLSec int) (string, error) {
 	if cacheTTLSec < 10 {
 		return "", fmt.Errorf("cache ttl can't be lower then 10 seconds: %d", cacheTTLSec)
 	}
 
-	clientIpStr := clientIp.String()
 	inCache, exists := g.cache.Load(clientIpStr)
 
 	if exists {
 		return inCache.(GeoCacheEntry).Domain, nil
 	}
 
-	clientLocation, err := g.getIPLatLong(clientIp)
+	clientIp, err := netip.ParseAddr(clientIpStr)
+	if err != nil {
+		return "", err
+	}
+
+	// We do not support IPv6 so we just skip it
+	if clientIp.Is6() && clientIp.IsPrivate() {
+		return "", fmt.Errorf("ipv6 and private subnets are not supported: %s", clientIp.String())
+	}
+
+	clientLocation, err := g.getIPLatLong(&clientIp)
 	if err != nil {
 		return "", fmt.Errorf("failed to get client location: %w", err)
 	}
