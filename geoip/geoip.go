@@ -309,7 +309,7 @@ func (g *GeoIpDatabase) GetDomainWithSmallestGeoDistance(clientIpStr string, cac
 	}
 
 	// We do not support IPv6 so we just skip it
-	if clientIp.Is6() && clientIp.IsPrivate() {
+	if clientIp.Is6() || clientIp.IsPrivate() {
 		return "", fmt.Errorf("ipv6 and private subnets are not supported: %s", clientIp.String())
 	}
 
